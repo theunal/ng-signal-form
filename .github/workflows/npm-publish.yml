@@ -58,7 +58,12 @@ jobs:
 
       - name: Publish to npm
         run: |
-          cd dist/signal-form
-          pnpm publish --no-git-checks --provenance --access public
+          VERSION='${{ steps.version.outputs.VERSION }}'
+          if npm view "ng-signal-form@$VERSION" version >/dev/null 2>&1; then
+            echo "ng-signal-form@$VERSION is already on the registry; skipping publish."
+          else
+            cd dist/signal-form
+            pnpm publish --no-git-checks --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
