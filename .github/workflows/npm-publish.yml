@@ -2,7 +2,6 @@ name: Build, Test & Publish
 
 on:
   push:
-    branches: [main]
     tags:
       - 'v*'
 
@@ -29,6 +28,14 @@ jobs:
           cache: 'pnpm'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Derive version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set library version
+        run: |
+          node -e "const p=require('./projects/signal-form/package.json'); p.version='${{ steps.version.outputs.VERSION }}'; require('fs').writeFileSync('./projects/signal-form/package.json', JSON.stringify(p, null, 2) + '\n')"
+
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run build
@@ -41,9 +48,8 @@ jobs:
           NODE_OPTIONS: '--max_old_space_size=6144'
 
       - name: Publish to npm
-        if: github.ref == 'refs/heads/main'
         run: |
           cd dist/signal-form
-          pnpm publish --provenance --access public
+          pnpm publish --no-git-checks --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
