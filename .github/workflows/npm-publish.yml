@@ -52,7 +52,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Run tests
-        run: pnpm run test -- --run
+        run: pnpm run test
         env:
           NODE_OPTIONS: '--max_old_space_size=6144'
 
