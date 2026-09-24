@@ -20,6 +20,11 @@
   },
   "homepage": "https://github.com/theunal/ng-signal-form#readme",
   "sideEffects": false,
+  "exports": {
+    ".": {
+      "default": "./public-api.ts"
+    }
+  },
   "peerDependencies": {
     "@angular/common": ">=21.0.0 <23.0.0",
     "@angular/core": ">=21.0.0 <23.0.0",
@@ -29,6 +34,7 @@
     "tslib": "^2.3.0"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   }
 }

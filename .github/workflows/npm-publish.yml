@@ -1,0 +1,49 @@
+name: Build, Test & Publish
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run build
+        env:
+          NODE_OPTIONS: '--max_old_space_size=6144'
+
+      - name: Run tests
+        run: pnpm run test -- --run
+        env:
+          NODE_OPTIONS: '--max_old_space_size=6144'
+
+      - name: Publish to npm
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd dist/signal-form
+          pnpm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
