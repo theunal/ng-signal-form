@@ -36,9 +36,20 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm run build
+      - name: Build (verbose)
+        run: |
+          pnpm run build -- --verbose 2>&1 | tee build.log
+          exit ${PIPESTATUS[0]}
         env:
           NODE_OPTIONS: '--max_old_space_size=6144'
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
 
       - name: Run tests
         run: pnpm run test -- --run
