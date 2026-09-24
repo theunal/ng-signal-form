@@ -1,0 +1,34 @@
+{
+  "name": "ng-signal-form",
+  "version": "0.1.0",
+  "description": "Signal-based, type-safe form utilities for Angular",
+  "keywords": [
+    "angular",
+    "forms",
+    "signals",
+    "signal-forms",
+    "reactive-forms",
+    "validation"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/theunal/ng-signal-form.git"
+  },
+  "bugs": {
+    "url": "https://github.com/theunal/ng-signal-form/issues"
+  },
+  "homepage": "https://github.com/theunal/ng-signal-form#readme",
+  "sideEffects": false,
+  "peerDependencies": {
+    "@angular/common": ">=21.0.0 <23.0.0",
+    "@angular/core": ">=21.0.0 <23.0.0",
+    "@angular/forms": ">=21.0.0 <23.0.0"
+  },
+  "dependencies": {
+    "tslib": "^2.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

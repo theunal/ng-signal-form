@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "version": 1,
+  "cli": {
+    "packageManager": "pnpm",
+    "analytics": false
+  },
+  "newProjectRoot": "projects",
+  "projects": {
+    "signal-form": {
+      "projectType": "library",
+      "root": "projects/signal-form",
+      "sourceRoot": "projects/signal-form/src",
+      "prefix": "sf",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:ng-packagr",
+          "configurations": {
+            "production": {
+              "tsConfig": "projects/signal-form/tsconfig.lib.prod.json"
+            },
+            "development": {
+              "tsConfig": "projects/signal-form/tsconfig.lib.json"
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "tsConfig": "projects/signal-form/tsconfig.spec.json"
+          }
+        }
+      }
+    }
+  }
+}
