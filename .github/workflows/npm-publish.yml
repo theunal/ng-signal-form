@@ -36,10 +36,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Build (verbose)
+      - name: Build with diagnostics
         run: |
-          pnpm run build -- --verbose 2>&1 | tee build.log
-          exit ${PIPESTATUS[0]}
+          npx ng build signal-form 2>&1 | tee build.log
+          test ${PIPESTATUS[0]} -eq 0 || exit ${PIPESTATUS[0]}
         env:
           NODE_OPTIONS: '--max_old_space_size=6144'
 
