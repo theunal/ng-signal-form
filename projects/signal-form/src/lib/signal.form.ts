@@ -350,12 +350,12 @@ export type AnyErrorKindMap = FieldErrorKinds & CustomErrorKinds;
  * {@link SignalFormTree} üzerindeki **fantom marka**: alanın değer tipi, kural
  * listesi, form yolu ve ebeveyn anahtarını taşır. Yalnızca tip seviyesindedir.
  *
- * Neden gerekli: `fieldErrors` / `formErrors` / `stateOf` gibi yardımcılar
- * generic'lerini ağacın **yapısal** tipinden çıkarmaya çalışınca TypeScript,
- * `SignalFormTree`'in (özyinelemeli alt alanlar + koşullu `errors`/`helpers`
- * kesişimleri) kendisini generic parametreye karşı eşleştirmek zorunda kalıyor
- * ve "excessively deep and possibly infinite" (TS2589) hatasına düşüyordu.
- * Marka üzerinden çıkarım yapılandırmasız ve derinlikten bağımsızdır.
+ * Neden gerekli: `fieldErrors` / `formErrors` gibi yardımcılar generic'lerini
+ * ağacın **yapısal** tipinden çıkarmaya çalışınca TypeScript, `SignalFormTree`'in
+ * (özyinelemeli alt alanlar + koşullu `errors`/`helpers` kesişimleri) kendisini
+ * generic parametreye karşı eşleştirmek zorunda kalıyor ve "excessively deep and
+ * possibly infinite" (TS2589) hatasına düşüyordu. Marka üzerinden çıkarım
+ * yapılandırmasız ve derinlikten bağımsızdır.
  */
 export type FormRulesRef<
     TValue,
@@ -597,8 +597,10 @@ type HelpersProperty<TModel, THelpers> = {
  *   türlerini içerir.
  *
  * `TKey` formdaki **yol** (`'address.city'`), `TParentKey` ise **ebeveyndeki
- * anahtar**dır (`'city'`, dizi öğesi için `number`). `TParentKey`, Angular'ın
- * `FieldTree<TModel, TKey>` generic'i üzerinden `state.keyInParent`'e iletilir.
+ * anahtar**dır (`'city'`, dizi öğesi için `number`) ve yalnızca {@link FormRulesRef}
+ * markasını besler. Dikkat: `keyInParent` **daraltılmaz** — Angular'ın kendi
+ * `Subfields`'i çocuk anahtarları `string` olarak tiplediği için `FieldTree`
+ * kesişiminde geniş tip kazanır.
  *
  * `FieldTree<TModel>`'e atanabilir; Angular API'lerine ve `[formField]`
  * direktifine doğrudan verilebilir. Modelde `errors` adlı bir alan varsa o
@@ -614,27 +616,6 @@ export type SignalFormTree<
     SignalSubfields<TModel, TRules, TKey> &
     FormRulesRef<TModel, TRules, TKey, TParentKey> &
     ([TKey] extends [''] ? HelpersProperty<TModel, FormTreeHelpers<TModel>> : object);
-
-/**
- * Angular `FieldState<TValue, TKey>` + tipli hata erişimi.
- *
- * Angular'da `state.errors` zaten `Signal<ValidationError[]>` olduğu için
- * kind başına erişim `errorOf(kind)` ile sunulur; bu, ağaçtaki
- * `field.errors.<kind>()` erişiminin state üzerindeki karşılığıdır.
- *
- * `TKey` formdaki yol, `TParentKey` ebeveyndeki anahtardır (`keyInParent`).
- */
-export type SignalFieldState<
-    TValue,
-    TParentKey extends string | number = string | number,
-    TRules = void,
-    TKey extends string = string,
-> = FieldState<TValue, TParentKey> & {
-    /** `state.errorOf('required')()` / `state.errorOf('nameValidator')()`. */
-    readonly errorOf: <TKind extends keyof ErrorSignalsFor<TRules, TKey> & string>(
-        kind: TKind,
-    ) => ErrorSignalsFor<TRules, TKey>[TKind];
-};
 
 type ConfigOf<TFn extends (...args: any[]) => void, TIndex extends number> = Parameters<TFn>[TIndex];
 
@@ -1170,40 +1151,6 @@ function wrapTree(tree: LooseFieldTree, helpers?: Record<string, unknown>): Loos
 
     return proxy;
 }
-
-/**
- * Bir alanın `FieldState`'ini döndürür; tipli hata erişimi (`errorOf`) ve daraltılmış
- * `keyInParent` eklenir. `form.x()` ile aynı state'i verir, yalnızca üstüne
- * {@link SignalFieldState} tipi eklenir.
- *
- * Modelde `errors` adlı bir alan bulunan düğümlerde `form.x.errors` veri alanına
- * dönüştüğü için hata erişimi bu yardımcı ya da `fieldErrorSignals()` üzerinden yapılır.
- */
-export function stateOf<
-    TValue,
-    TRules extends RuleList | void,
-    TKey extends string,
-    TParentKey extends string | number,
->(
-    field: (() => any) & FormRulesRef<TValue, TRules, TKey, TParentKey>,
-): SignalFieldState<TValue, TParentKey, TRules, TKey> {
-    const state = untracked(field as unknown as LooseFieldTree) as FieldState<TValue, TParentKey>;
-    const errorSignals = fieldErrorSignals(field as unknown as LooseFieldTree);
-    const cache = stateHelpers.get(state);
-
-    if (cache) {
-        return cache as SignalFieldState<TValue, TParentKey, TRules, TKey>;
-    }
-
-    const enhanced = Object.assign(Object.create(null), state, {
-        errorOf: (kind: string) => (errorSignals as unknown as Record<string, Signal<unknown>>)[kind],
-    }) as SignalFieldState<TValue, TParentKey, TRules, TKey>;
-
-    stateHelpers.set(state, enhanced);
-    return enhanced;
-}
-
-const stateHelpers = new WeakMap<object, object>();
 
 /** `createForm` seçenekleri: Angular `FormOptions` + sarmalayıcıya özgü alanlar. */
 export interface CreateFormOptions<TModel> extends FormOptions<TModel> {

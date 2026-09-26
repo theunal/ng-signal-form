@@ -5,12 +5,12 @@ import {
   createForm,
   defineValidator,
   email,
+  fieldErrorSignals,
   fieldErrors,
   formErrors,
   minLength,
   required,
   requiredTrue,
-  stateOf,
   type CustomValidationError,
   type ValidatorKindsOf,
   type ValidationError,
@@ -141,7 +141,7 @@ describe('signal-form block schema with a custom error kind registry', () => {
     expect(form.name.errors['nameValidator']()?.kind).toBe('nameValidator');
   });
 
-  it('exposes custom kinds on the error map tree and on stateOf', () => {
+  it('exposes custom kinds on the error map tree', () => {
     const form = withForm(() =>
       createForm<FormModel>(initial, (path) => {
         nameValidator(path.name);
@@ -154,10 +154,7 @@ describe('signal-form block schema with a custom error kind registry', () => {
     expect(errors.name.errors.nameValidator).toBe(true);
     expect(errors.name.errors.required).toBeUndefined();
     expect(fieldErrors(form.name)().nameValidator).toBe(true);
-
-    const state = stateOf(form.name);
-    expect(state.errorOf('nameValidator')()?.min).toBe(3);
-    expect(state.errorOf('required')()).toBeUndefined();
+    expect(fieldErrorSignals(form.name).nameValidator()?.min).toBe(3);
   });
 
   it('offers root helpers bound on the tree', () => {

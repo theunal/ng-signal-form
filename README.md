@@ -152,8 +152,6 @@ form.patchValue({ name: 'Grace' });
 form.reset();          // back to the createForm snapshot, dirty/touched cleared
 form.status();         // 'valid' | 'invalid' | 'pending' | 'disabled'
 form.markAllTouched();
-
-stateOf(form.name).errorOf('customValidator')()?.message;
 ```
 
 
