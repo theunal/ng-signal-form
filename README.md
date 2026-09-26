@@ -154,6 +154,40 @@ form.status();         // 'valid' | 'invalid' | 'pending' | 'disabled'
 form.markAllTouched();
 ```
 
+### Touched / dirty inverse flags
+
+Angular exposes `touched` / `dirty` on the **field state**, so those are read with a
+call on the state. The inverse flags do not exist in Angular and are derived here at
+the **tree** level, so they are read without one:
+
+```ts
+form.name.untouched();    // tree:  derived → !touched
+form.name().touched();    // state: Angular
+form.name().dirty();      // state: Angular
+form.name.pristine();     // tree:  derived → !dirty
+```
+
+The asymmetry is deliberate: adding the inverse flags to the tree keeps every state
+read (`form.x().value()`, `errors()`, `valid()`, …) as a direct Angular state instead
+of routing it through a proxy.
+
+| Read | Where it comes from | Syntax |
+| --- | --- | --- |
+| `touched`, `dirty` | Angular `FieldState` | `form.name().touched()` |
+| `untouched`, `pristine` | derived here | `form.name.pristine()` |
+| `errors.<kind>()` | added here | `form.name.errors.required()` |
+
+The write side is available per subtree, not just for the whole form:
+
+```ts
+markUntouched(this.form.domain);   // just `domain` and its descendants
+markPristine(this.form.address);   // dirty → false, touched preserved
+```
+
+> These are **derived** flags. Angular reports a field as `touched`/`dirty` when
+> the field *or any of its descendants* is, so `form.address.untouched()` turns
+> `false` as soon as one child of the group is touched.
+
 
 ## Migrating from 0.1.x
 
