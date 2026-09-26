@@ -1,6 +1,6 @@
 {
   "name": "ng-signal-form",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Signal-based, type-safe form utilities for Angular",
   "keywords": [
     "angular",
