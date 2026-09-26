@@ -58,8 +58,16 @@ import type {
  * yeni bir soyutlama katmanı eklenmez, sadece okunabilirlik sağlanır.
  */
 
-/** `createForm` ikinci parametresi: `(path) => { required(path.x) ... }`. */
-export type FormSchema<TModel> = (path: SchemaPathTree<TModel>) => void;
+/**
+ * `createForm` ikinci parametresi: `(path) => { required(path.x) ... }`.
+ *
+ * `TRules` kural listesi döndüren şemalarda kurulur, blok (void) şemada
+ * `void` kalır. `TypedPathTree` kullanılır — böylece `path.x` üzerinde
+ * `errors` erişimcisi de gelir ve kurallar alan konumunu (`TKey`) taşır.
+ */
+export type FormSchema<TModel, TRules extends RuleList | void = void> = (
+    path: TypedPathTree<TModel>,
+) => TRules;
 
 /**
  * Herhangi bir derinlikteki (root / child / array item) tek bir alanın path'i.
@@ -220,7 +228,7 @@ let compilingRootPath: SchemaPath<unknown> | undefined;
  */
 export function createForm<TModel, TRules extends RuleList | void = void>(
     initial: ModelInput<TModel>,
-    schema?: (path: TypedPathTree<TModel>) => TRules,
+    schema?: FormSchema<TModel, TRules>,
     options?: CreateFormOptions<TModel>,
 ): SignalFormTree<TModel, TRules> {
     const model = toModel(initial);
@@ -341,7 +349,7 @@ export interface FieldErrorKinds {
  * zaten kurallardan çıkarıldığı için ek bildirim gerekmez ve bir kural kaldırıldığında
  * `errors.<kind>` derleme hatası vermeye devam eder.
  */
-export interface CustomErrorKinds {}
+export interface CustomErrorKinds { }
 
 /** Kayıt altındaki tüm hata kind'ları: yerleşik + {@link CustomErrorKinds}. */
 export type AnyErrorKindMap = FieldErrorKinds & CustomErrorKinds;
@@ -454,8 +462,24 @@ export interface FieldRule<TKey extends string = string, TError extends AnyError
 /** Şemanın döndürebileceği kural listesi (iç içe diziler düzleştirilir). */
 export type RuleList = readonly (FieldRule<any, any> | RuleList)[];
 
-type FlatRules<T> =
-    T extends FieldRule<any, any> ? T : T extends readonly (infer E)[] ? FlatRules<E> : never;
+/**
+ * `FlatRules` için yineleme derinliği sınırı.
+ *
+ * `RuleList` özyinelemeli bir tip (`FieldRule | RuleList`), bu yüzden sınırsız
+ * düzleştirmede TypeScript "excessively deep" (TS2589) hatasına düşüyor —
+ * örneğin bir şemayı `FormSchema<Model, RuleList>` ile açıkça annotate etmek
+ * ya da iç içe `applyEachRules` kullanmak bu yola giriyor. Sınır, bu durumda
+ * tipin sessizce `never`'a inmesini sağlar (derleme hatası yerine).
+ */
+type PrevDepth = [never, 0, 1, 2, 3, 4, 5, 6, 7, 8];
+
+type FlatRules<T, TDepth extends number = 6> = [TDepth] extends [never]
+    ? never
+    : T extends FieldRule<any, any>
+    ? T
+    : T extends readonly (infer E)[]
+    ? FlatRules<E, PrevDepth[TDepth]>
+    : never;
 
 type IsExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
@@ -482,8 +506,8 @@ type ErrorsAtKey<TRule, TKey extends string> =
  */
 export type RuleKinds<TRules> =
     FlatRules<TRules> extends infer R
-        ? R extends FieldRule<any, infer E extends AnyError> ? E['kind'] : never
-        : never;
+    ? R extends FieldRule<any, infer E extends AnyError> ? E['kind'] : never
+    : never;
 
 /**
  * `TRules` içinde yalnızca `TKey` alanına eklenen kuralların hata kind union'ı.
@@ -500,8 +524,8 @@ export type ErrorKindsAt<TRules, TKey extends string> = [TRules] extends [void]
     ? never
     : FlatRules<TRules> extends infer R
     ? R extends FieldRule<infer K, infer E extends AnyError>
-        ? IsExact<K, TKey> extends true ? E['kind'] : never
-        : never
+    ? IsExact<K, TKey> extends true ? E['kind'] : never
+    : never
     : never;
 
 /**
@@ -580,12 +604,60 @@ export interface FormTreeHelpers<TModel> {
     readonly enabledValue: () => Partial<TModel>;
     /** `'disabled' > 'pending' > 'valid' | 'invalid'` öncelikli durum sinyali. */
     readonly status: Signal<ControlStatus>;
+    /** Tüm alanları untouched yapar (takma adı, alt ağaç için de kullanılır). */
+    readonly markUntouched: () => void;
+    /** Tüm alanları pristine yapar (takma adı, alt ağaç için de kullanılır). */
+    readonly markPristine: () => void;
 }
 
 /** Modelde çakışan anahtarları eleyen yardımcı property tipi. */
 type HelpersProperty<TModel, THelpers> = {
     readonly [K in keyof THelpers as K extends keyof TModel ? never : K]: THelpers[K];
 };
+
+/**
+ * Her alanda bulunan **ters** durum bayrakları: `form.name.untouched()`,
+ * `form.name.pristine()`.
+ *
+ * Angular `FieldState` yalnızca `touched()` / `dirty()` sunar; inverse'i
+ * (`untouched` / `pristine`) public API'de yoktur — burada türetilir.
+ *
+ * > **Neden ağaç seviyesinde?** Angular'ın bayrakları state üzerindedir, bu
+ * yüzden onlar `form.name().touched()` ile okunur. Ters bayraklar ağaca eklenir
+ * (`form.name.pristine()`) ki her state okuması — `value()`, `errors()`,
+ * `valid()` — Angular'ın doğrudan state'i olarak kalsın, Proxy'den geçmesin.
+ * Bu asimetri kasıtlıdır.
+ *
+ * > **Türetilmiş bayraktır.** Angular'da `touched`/`dirty` bir alanın **kendisi
+ * > veya herhangi bir torunu** için true ise ebeveynde de true görünür. Bu yüzden
+ * > `form.address.untouched()` bir grup alanda, tek bir çocuğu dokunulduğu anda
+ * > `false` olur; "alanın kendi bayrağı" anlamına gelmez. Tek bir alanın kendi
+ * > bayrağını temizlemek için {@link markUntouched} / {@link markPristine}
+ * > kullanılır.
+ *
+ * Modelde aynı isimli bir alan varsa sinyal **eklenmez** (veri alanı önceliklidir).
+ *
+ * @example
+ * ```ts
+ * const form = createForm(initial, (path) => [required(path.name)]);
+ *
+ * form.name.untouched();    // tree:  derived → !touched
+ * form.name().touched();    // state: Angular
+ * form.name().dirty();      // state: Angular
+ * form.name.pristine();     // tree:  derived → !dirty
+ *
+ * markUntouched(form.name);
+ * ```
+ */
+export interface StateFlagSignals {
+    /** `!state.touched()` — alan veya torunlarından biri dokunulmadı. */
+    readonly untouched: Signal<boolean>;
+    /** `!state.dirty()` — alan veya torunlarından biri değiştirilmedi. */
+    readonly pristine: Signal<boolean>;
+}
+
+/** Modelde çakışan anahtarları eleyen bayrak property tipi. */
+type FlagsProperty<TModel> = HelpersProperty<TModel, StateFlagSignals>;
 
 /**
  * Angular `FieldTree` + her seviyede `errors` erişimcisi:
@@ -605,6 +677,8 @@ type HelpersProperty<TModel, THelpers> = {
  * `FieldTree<TModel>`'e atanabilir; Angular API'lerine ve `[formField]`
  * direktifine doğrudan verilebilir. Modelde `errors` adlı bir alan varsa o
  * seviyede alan önceliklidir, hatalar için `fieldErrorSignals()` kullanın.
+ *
+ * Her düğümde ayrıca {@link StateFlagSignals} (`untouched` / `pristine`) bulunur.
  */
 export type SignalFormTree<
     TModel,
@@ -615,6 +689,7 @@ export type SignalFormTree<
     ErrorsProperty<TModel, TRules, TKey> &
     SignalSubfields<TModel, TRules, TKey> &
     FormRulesRef<TModel, TRules, TKey, TParentKey> &
+    FlagsProperty<TModel> &
     ([TKey] extends [''] ? HelpersProperty<TModel, FormTreeHelpers<TModel>> : object);
 
 type ConfigOf<TFn extends (...args: any[]) => void, TIndex extends number> = Parameters<TFn>[TIndex];
@@ -738,7 +813,7 @@ export function maxDate<
  * imzası bu birleşimi değil, doğrudan `check`in dönüş tipini kullanır):
  * - `true`, `null`, `undefined` → geçerli
  * - `false` → hata (mesaj: çağrıdaki `message` ya da tanımdaki varsayılan)
- * - `string` → hata, mesaj bu string
+ * - `string` → hata, mesaj bu string (çağrıdaki `message` varsa o kazanır)
  * - obje → hata, objenin alanları hataya eklenir (tipli: `errors.x()?.alan`)
  *
  * @example
@@ -749,7 +824,11 @@ export function maxDate<
 export type ValidatorResult<TExtra extends object = {}> = boolean | string | TExtra | null | undefined;
 
 export interface ValidatorCallOptions<TValue, TPathKind extends PathKind = PathKind.Root> {
-    message?: string;
+    /**
+     * Hata mesajını geçersiz kılar. `string` ya da değere göre hesaplanan bir
+     * fonksiyon olabilir (i18n interpolasyonu için tipik kullanım).
+     */
+    message?: string | LogicFn<TValue, string, TPathKind>;
     /** `false` döndüğünde doğrulayıcı çalışmaz. */
     when?: LogicFn<TValue, boolean, TPathKind>;
 }
@@ -810,7 +889,7 @@ export type ValidatorError<TValidator> = TValidator extends ValidatorRule<
  * `ValidatorKindsOf<[typeof nameValidator]>`.
  */
 export type ValidatorKindsOf<TValidators extends readonly ValidatorRule<any, any, any>[]> = {
-    readonly [TValidator in TValidators[number] as ValidatorKind<TValidator>]: ValidatorError<TValidator>;
+    readonly [TValidator in TValidators[number]as ValidatorKind<TValidator>]: ValidatorError<TValidator>;
 };
 
 /**
@@ -858,14 +937,22 @@ export function defineValidator<TKind extends string, TValue, TResult>(
                 return undefined;
             }
 
-            const message = options.message ?? defaults.message;
+            // Mesaj önceliği: çağrıdaki `message` > check'in döndürdüğü string >
+            // tanımdaki varsayılan. Çağrıdaki mesaj her zaman kazanır — aksi
+            // halde i18n override'ı sessizce yok sayılıyordu.
+            const override = options.message;
+            const overrideMessage =
+                typeof override === 'function'
+                    ? override(context as FieldContext<TValue, any>)
+                    : override;
+            const message = overrideMessage ?? defaults.message;
 
             if (result === false) {
                 return { kind, message };
             }
 
             if (typeof result === 'string') {
-                return { kind, message: result };
+                return { kind, message: overrideMessage ?? result };
             }
 
             return { message, ...result, kind };
@@ -1045,6 +1132,45 @@ function signalForKind(
     return kindSignal;
 }
 
+const treeFlagSignals = new WeakMap<object, Partial<StateFlagSignals>>();
+
+/**
+ * Bir alanın ters bayrak sinyallerini döndürür (`untouched` / `pristine`).
+ *
+ * Sinyaller ağaç kimliğiyle önbelleklenir: şablonda tekrar tekrar okunsa bile
+ * her okumada yeni `computed` üretilmez, kimlik sabit kalır.
+ *
+ * Modelde aynı isimli bir alan varsa bayrak **eklenmez** — veri alanı önceliklidir
+ * (tipte aynı kural `FlagsProperty` ile uygulanır).
+ */
+function stateFlagSignals(tree: LooseFieldTree): Partial<StateFlagSignals> {
+    const cached = treeFlagSignals.get(tree);
+
+    if (cached) {
+        return cached;
+    }
+
+    const state = untracked(tree);
+    const flags: Partial<StateFlagSignals> = {
+        untouched: computed(() => !state.touched()),
+        pristine: computed(() => !state.dirty()),
+    };
+
+    const value = state.value();
+
+    if (typeof value === 'object' && value !== null) {
+        for (const name of ['untouched', 'pristine'] as const) {
+            if (Object.hasOwn(value, name)) {
+                delete flags[name];
+            }
+        }
+    }
+
+    treeFlagSignals.set(tree, flags);
+
+    return flags;
+}
+
 /**
  * Kök ağaca {@link FormTreeHelpers} metotlarını bağlar.
  *
@@ -1064,6 +1190,8 @@ function createTreeHelpers<TModel extends object>(tree: LooseFieldTree): Record<
         markAllUntouched: () => markAllUntouched(tree),
         markAllDirty: () => markAllDirty(tree),
         markAllPristine: () => markAllPristine(tree),
+        markUntouched: () => markUntouched(tree),
+        markPristine: () => markPristine(tree),
         enabledValue: () => enabledValue(tree as unknown as FieldTree<TModel>),
         status: computed(() => formStatus(tree)),
     };
@@ -1102,6 +1230,17 @@ function wrapTree(tree: LooseFieldTree, helpers?: Record<string, unknown>): Loos
                 return helpers[property];
             }
 
+            // Ters bayraklar (`untouched` / `pristine`): Angular'da karşılığı yok,
+            // burada türetilir. `stateFlagSignals` yalnızca çakışmayanları döndürür,
+            // bu yüzden çakışan bir model alanında normal alan erişimi devreder.
+            if (property === 'untouched' || property === 'pristine') {
+                const flag = stateFlagSignals(tree)[property];
+
+                if (flag !== undefined) {
+                    return flag;
+                }
+            }
+
             const value = Reflect.get(tree, property, receiver);
 
             if (property === 'errors' && value === undefined) {
@@ -1125,6 +1264,8 @@ function wrapTree(tree: LooseFieldTree, helpers?: Record<string, unknown>): Loos
                 (helpers !== undefined &&
                     typeof property === 'string' &&
                     Object.hasOwn(helpers, property)) ||
+                ((property === 'untouched' || property === 'pristine') &&
+                    stateFlagSignals(tree)[property] !== undefined) ||
                 property === 'errors' ||
                 Reflect.has(tree, property)
             );
@@ -1882,6 +2023,23 @@ export function markAllUntouched(form: LooseFieldTree): void {
     }
 }
 
+/**
+ * {@link markAllUntouched} takma adı — tek bir alan ağacı için okunaklı yazım.
+ *
+ * `markAll*` fonksiyonları form köküyle sınırlı değildir: `walkFields` verilen
+ * ağaçtan başlar ve `FieldState.reset()` alanı **ve torunlarını** reset eder,
+ * bu yüzden tek bir alana da verilebilir:
+ *
+ * ```ts
+ * markUntouched(this.form.domain);   // sadece domain + alt alanları
+ * markPristine(this.form.address);
+ * ```
+ */
+export const markUntouched = markAllUntouched;
+
+/** {@link markAllPristine} takma adı — tek bir alan ağacı için okunaklı yazım. */
+export const markPristine = markAllPristine;
+
 /** `resetForm` seçenekleri. */
 export interface ResetFormOptions<TModel> {
     /**
@@ -2283,6 +2441,7 @@ export {
 } from '@angular/forms/signals';
 
 export type {
+    EmailValidationError,
     FieldContext,
     FieldState,
     FieldTree,
@@ -2290,10 +2449,19 @@ export type {
     FormOptions,
     LogicFn,
     MarkAsTouchedOptions,
+    MaxDateValidationError,
+    MaxLengthValidationError,
+    MaxValidationError,
+    MinDateValidationError,
+    MinLengthValidationError,
+    MinValidationError,
     PathKind,
+    PatternValidationError,
     ReadonlyFieldState,
+    RequiredValidationError,
     SchemaPath,
     SchemaPathTree,
+    StandardSchemaValidationError,
     TreeValidator,
     ValidationError,
 } from '@angular/forms/signals';

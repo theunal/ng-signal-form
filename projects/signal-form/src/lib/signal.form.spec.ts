@@ -1,9 +1,10 @@
 import { TestBed } from '@angular/core/testing';
-import { Injector, signal } from '@angular/core';
-import { describe, expect, it, vi } from 'vitest';
+import { Injector, signal, type Signal } from '@angular/core';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import {
   applyEach,
+  applyEachRules,
   bagToErrors,
   createForm,
   disabled,
@@ -31,6 +32,8 @@ import {
   markAllPristine,
   markAllTouched,
   markAllUntouched,
+  markPristine,
+  markUntouched,
   resetForm,
   enabledValue,
   onChange,
@@ -78,6 +81,11 @@ describe('signal-form sync validation', () => {
     // form.name.errors.email();
     // form.name.errors.maxDate();
     // let m = form.name.errors.customValidator()?.message;
+
+    // form.name.untouched();
+    // form.name().touched();
+    // form.name().dirty();
+    // form.name.pristine();
 
     form.name().value.set('A');
     expect(fieldErrorBag(form.name())['required']).toBeUndefined();
@@ -267,6 +275,98 @@ describe('signal-form dirty/touched helpers', () => {
     markAllDirty(form);
     expect(form.a().dirty()).toBe(true);
     expect(form.b().dirty()).toBe(true);
+  });
+
+  it('exposes the inverse flags as tree-level signals', () => {
+    const form = withForm(() => createForm({ a: '', b: '' }));
+
+    expectTypeOf(form.a.untouched).toEqualTypeOf<Signal<boolean>>();
+    expectTypeOf(form.a.pristine).toEqualTypeOf<Signal<boolean>>();
+
+    // başlangıç: ikisi de ters çevrilmiş
+    expect(form.a.untouched()).toBe(true);
+    expect(form.a.pristine()).toBe(true);
+
+    // dirty yalnızca kullanıcı girdisiyle (controlValue) işaretlenir
+    form.a().controlValue.set('x');
+    expect(form.a.pristine()).toBe(false);
+    expect(form.a.untouched()).toBe(true);
+
+    markAllTouched(form);
+    expect(form.a.untouched()).toBe(false);
+    expect(form.b.untouched()).toBe(false); // türetilmiş: ebeveyn dokunuldu
+
+    // aynı signal kimliği korunur (şablonda tekrar okumak yeni computed üretmez)
+    expect(form.a.untouched).toBe(form.a.untouched);
+    expect(form.a.pristine).toBe(form.a.pristine);
+  });
+
+  it('markUntouched / markPristine work on a single field subtree', () => {
+    const form = withForm(() => createForm({ a: '', b: '' }));
+
+    form.a().controlValue.set('x');
+    markAllTouched(form);
+    form.b().controlValue.set('y');
+
+    expect(form.a().dirty()).toBe(true);
+    expect(form.b().dirty()).toBe(true);
+
+    // yalnızca a'nın dalı temizlenir
+    markUntouched(form.a);
+    expect(form.a().touched()).toBe(false);
+    expect(form.a.untouched()).toBe(true);
+    expect(form.b().touched()).toBe(true);
+
+    // dirty korunur (selfFlagged yeniden yükler)
+    expect(form.a().dirty()).toBe(true);
+    expect(form.b().dirty()).toBe(true);
+
+    markPristine(form.a);
+    expect(form.a().dirty()).toBe(false);
+    expect(form.a.pristine()).toBe(true);
+    expect(form.b().dirty()).toBe(true);
+
+    // touched korunur
+    expect(form.b().touched()).toBe(true);
+  });
+
+  it('reverts a subtree without touching its siblings', () => {
+    const initial = { address: { city: '', zip: '' }, other: '' };
+    const form = withForm(() => createForm(initial));
+
+    form.address.city().controlValue.set('Istanbul');
+    form.address.zip().controlValue.set('34000');
+    form.other().controlValue.set('x');
+    markAllTouched(form);
+
+    expect(form.address().touched()).toBe(true);
+
+    markUntouched(form.address);
+
+    expect(form.address().touched()).toBe(false);
+    expect(form.address.city().touched()).toBe(false);
+    expect(form.address.zip().touched()).toBe(false);
+    // kardeş dal korunur
+    expect(form.other().touched()).toBe(true);
+  });
+
+  it('does not shadow a model field that collides with a flag name', () => {
+    interface Colliding {
+      pristine: boolean;
+      a: string;
+    }
+
+    const form = withForm(() => createForm<Colliding>({ pristine: true, a: '' }));
+
+    // veri alanı öncelikli: sinyal değil, alan ağacı
+    expect(form.pristine().value()).toBe(true);
+    expectTypeOf(form.pristine).not.toEqualTypeOf<Signal<boolean>>();
+
+    // alanın kendi altında bayrak normal
+    expectTypeOf(form.pristine.untouched).toEqualTypeOf<Signal<boolean>>();
+
+    // çakışmayan alanda bayrak normal
+    expect(form.a.pristine()).toBe(true);
   });
 
   it('reset clears touched and dirty but keeps values', () => {
@@ -641,8 +741,7 @@ describe('signal-form error maps and error tree', () => {
     expect(errors().givenName.errors.required).toBeUndefined();
 
     markAllTouched(form);
-    expect(errors().givenName.errors.required).toBe(true);
-  });
+    expect(errors().givenName.errors.required).toBe(true);  });
 
   it('formErrors reflects the error message into the map', () => {
     const form = withForm(() =>
@@ -651,6 +750,48 @@ describe('signal-form error maps and error tree', () => {
 
     const errors = formErrors(form);
     expect(errors().name.errors.required).toBe('Name is required');
+  });
+
+  it('formErrors builds an array-shaped error tree with per-item errors', () => {
+    const initial = { tags: ['', ''] };
+    const form = withForm(() =>
+      createForm(initial, (path) => [
+        required(path.tags),
+        applyEachRules(path.tags, (item) => [required(item), minLength(item, 2)]),
+      ]),
+    );
+
+    const errors = formErrors(form);
+
+    // dizi düğümünün kendi `errors`'ı non-enumerable olarak eklenir
+    expect(errors().tags.errors).toEqual({});
+
+    form.tags[0]().value.set('a');
+    form.tags[1]().value.set('');
+
+    expect(errors().tags[0].errors.minLength).toBe(true);
+    expect(errors().tags[0].errors.required).toBeUndefined();
+    expect(errors().tags[1].errors.required).toBe(true);
+    // non-enumerable: Object.keys diziyi olduğu gibi bırakır
+    expect(Object.keys(errors().tags)).toEqual(['0', '1']);
+
+    form.tags[0]().value.set('alpha');
+    form.tags[1]().value.set('beta');
+    expect(errors().tags[0].errors).toEqual({});
+    expect(errors().tags[1].errors).toEqual({});
+  });
+
+  it('formErrors honours onlyTouched for array items', () => {
+    const initial = { tags: [''] };
+    const form = withForm(() =>
+      createForm(initial, (path) => [applyEachRules(path.tags, (item) => [required(item)])]),
+    );
+
+    const errors = formErrors(form, { onlyTouched: true });
+    expect(errors().tags[0].errors.required).toBeUndefined();
+
+    markAllTouched(form);
+    expect(errors().tags[0].errors.required).toBe(true);
   });
 });
 
@@ -680,6 +821,94 @@ describe('signal-form field error signals', () => {
     expect(errors.required()?.message).toBe('Name is required');
     expect(errors.required()?.kind).toBe('required');
   });
+
+  it('is the escape hatch when the model has a field named errors', () => {
+    interface WithErrors {
+      name: string;
+      errors: string[];
+    }
+
+    const form = withForm(() =>
+      createForm<WithErrors>({ name: '', errors: [] }, (path) => [required(path.name)]),
+    );
+
+    // veri alanı öncelikli: form.x.errors bir alan ağacı, sinyal değil
+    expect(form.errors().value()).toEqual([]);
+    expect(form.errors().keyInParent()).toBe('errors');
+
+    // hata erişimi fieldErrorSignals üzerinden
+    const errors = fieldErrorSignals(form.name);
+
+    form.name().value.set('Ali');
+    expect(errors.required()).toBeUndefined();
+
+    form.name().value.set('');
+    expect(errors.required()).toBeDefined();
+
+    // harita (ErrorMap) yardımcısı da çalışır
+    expect(fieldErrors(form.name)().required).toBe(true);
+  });
+});
+
+describe('signal-form defineValidator options', () => {
+  const notEmpty = defineValidator('notEmpty', (value: string) =>
+    value.length > 0 ? true : 'boş olamaz',
+  );
+  const neverFails = defineValidator('neverFails', () => false, { message: 'varsayılan mesaj' });
+
+  it('overrides the message the check returned', () => {
+    const form = withForm(() =>
+      createForm({ a: '' }, (path) => [notEmpty(path.a, { message: 'i18n: a gerekli' })]),
+    );
+
+    form.a().value.set('x');
+    expect(form.a.errors.notEmpty()).toBeUndefined();
+
+    form.a().value.set('');
+    expect(form.a.errors.notEmpty()?.message).toBe('i18n: a gerekli');
+  });
+
+  it('falls back to the message the check returned when no override is given', () => {
+    const form = withForm(() => createForm({ a: '' }, (path) => [notEmpty(path.a)]));
+
+    form.a().value.set('');
+    expect(form.a.errors.notEmpty()?.message).toBe('boş olamaz');
+  });
+
+  it('accepts a LogicFn for the message', () => {
+    const form = withForm(() =>
+      createForm({ a: '' }, (path) => [
+        notEmpty(path.a, { message: (ctx) => `i18n: ${String(ctx.value()).length} karakter` }),
+      ]),
+    );
+
+    form.a().value.set('');
+    expect(form.a.errors.notEmpty()?.message).toBe('i18n: 0 karakter');
+  });
+
+  it('uses the definition default when the check returns false', () => {
+    const form = withForm(() => createForm({ a: 'x' }, (path) => [neverFails(path.a)]));
+
+    expect(form.a.errors.neverFails()?.message).toBe('varsayılan mesaj');
+  });
+
+  it('skips the validator when when() returns false', () => {
+    const enabled = signal(false);
+    const form = withForm(() =>
+      createForm({ a: '' }, (path) => [notEmpty(path.a, { when: () => enabled() })]),
+    );
+
+    // kapalıyken doğrulayıcı hiç çalışmaz → hata yok
+    expect(form.a.errors.notEmpty()).toBeUndefined();
+    expect(form().valid()).toBe(true);
+
+    enabled.set(true);
+    expect(form.a.errors.notEmpty()?.message).toBe('boş olamaz');
+    expect(form().valid()).toBe(false);
+
+    form.a().value.set('x');
+    expect(form.a.errors.notEmpty()).toBeUndefined();
+  });
 });
 
 describe('signal-form createForm inputs', () => {
@@ -702,6 +931,28 @@ describe('signal-form createForm inputs', () => {
 
     form.a().value.set('y');
     expect(form().value()).toEqual({ a: 'y' });
+  });
+
+  it('accepts an explicit injector outside of an injection context', () => {
+    // JSDoc: injection context dışında çağrılacaksa options.injector verilmelidir
+    const injector = withForm(() => TestBed.inject(Injector));
+
+    // bu çağrı bilinçli olarak injection context DIŞINDA (withForm kullanılmıyor)
+    const form = createForm(
+      { a: '' },
+      (path) => [required(path.a)],
+      { injector },
+    );
+
+    form.a().value.set('');
+    expect(form.a.errors.required()).toBeDefined();
+    form.a().value.set('x');
+    expect(form.a.errors.required()).toBeUndefined();
+  });
+
+  it('throws when no injector is available outside an injection context', () => {
+    // inject() bulamazsa Angular'ın kendi hatası fırlatılır
+    expect(() => createForm({ a: '' })).toThrow();
   });
 });
 

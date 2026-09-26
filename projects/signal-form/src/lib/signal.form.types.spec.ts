@@ -18,7 +18,10 @@ import {
   type CustomValidationError,
   type ErrorKindsAt,
   type ErrorMap,
+  type FieldRule,
   type FormErrors,
+  type FormSchema,
+  type RequiredValidationError,
   type RuleKinds,
   type TypedPathTree,
 } from './signal.form';
@@ -183,6 +186,38 @@ describe('signal-form type-level error kinds', () => {
 });
 
 describe('signal-form schema call styles', () => {
+  it('FormSchema covers both a rule list and a block schema', () => {
+    const annotated: Profile = { ...initial };
+
+    // Kural listesi: TRules'in şemadan çıkarılması gerekir. `RuleList` gibi
+    // geniş bir tipi annotate etmek (iç içe dizi içerebileceği için) alan bazlı
+    // kind çıkarımını bozar — bu yüzden burada `FormSchema<Profile>` kullanılır
+    // ve dönüş tipi çıkarılmaya bırakılır.
+    const listForm = withForm(() =>
+      createForm(annotated, (path) => [required(path.firstName), minLength(path.firstName, 2)]),
+    );
+
+    expectTypeOf(listForm.firstName.errors.required).toBeFunction();
+    expectTypeOf(listForm.firstName.errors.minLength).toBeFunction();
+
+    // blok (void) şema: FormSchema<Profile> doğrudan annotate edilebilir
+    const blockSchema: FormSchema<Profile> = (path) => {
+      required(path.firstName);
+    };
+    const blockForm = withForm(() => createForm(annotated, blockSchema));
+
+    // gevşek mod: yerleşik kind'ler erişilebilir
+    expectTypeOf(blockForm.firstName.errors.required).toBeFunction();
+
+    // kural listesini döndüren şemalar da aynı tipte tanımlanabilir
+    const listSchema: FormSchema<Profile, [FieldRule<'firstName', RequiredValidationError>]> = (
+      path,
+    ) => [required(path.firstName)];
+    const typedForm = withForm(() => createForm(annotated, listSchema));
+
+    expectTypeOf(typedForm.firstName.errors.required).toBeFunction();
+  });
+
   it('infers TModel and TRules from an annotated initial value', () => {
     const annotated: Profile = { ...initial };
 

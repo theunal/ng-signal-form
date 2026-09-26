@@ -200,6 +200,47 @@ describe('signal-form block schema with a custom error kind registry', () => {
     expect(form.status()).toBe('invalid');
   });
 
+  it('binds the markAll* flags and the markUntouched/markPristine aliases on the root', () => {
+    const form = withForm(() => createForm<FormModel>(initial));
+
+    // kullanıcı girdisi: dirty, ortak markAsTouched ile touched
+    form.name().controlValue.set('Ali');
+    form.markAllTouched();
+
+    expect(form.name().dirty()).toBe(true);
+    expect(form.name().touched()).toBe(true);
+    expect(form.name.pristine()).toBe(false);
+    expect(form.name.untouched()).toBe(false);
+
+    // markAllDirty tüm alanları kirletir
+    form.markAllDirty();
+    expect(form.email().dirty()).toBe(true);
+    expect(form.consent().dirty()).toBe(true);
+
+    // markPristine takma adı: dirty sıfırlanır, touched korunur
+    form.markPristine();
+    expect(form.name().dirty()).toBe(false);
+    expect(form.email().dirty()).toBe(false);
+    expect(form.name().touched()).toBe(true);
+    expect(form.name.pristine()).toBe(true);
+    expect(form.name.untouched()).toBe(false);
+
+    form.name().controlValue.set('Veli');
+
+    // markUntouched takma adı: touched sıfırlanır, dirty korunur
+    form.markUntouched();
+    expect(form.name().touched()).toBe(false);
+    expect(form.name().dirty()).toBe(true);
+    expect(form.name.untouched()).toBe(true);
+    expect(form.name.pristine()).toBe(false);
+
+    // markAllUntouched da kökten bağlı
+    form.markAllTouched();
+    form.markAllUntouched();
+    expect(form.name().touched()).toBe(false);
+    expect(form.email().touched()).toBe(false);
+  });
+
   it('does not shadow a model field that collides with a helper name', () => {
     interface Colliding extends FormModel {
       status: string;
