@@ -37,9 +37,7 @@ import {
   disableControl,
   disableWhen,
   touchAll,
-  type FormSchema,
-  SchemaPath,
-  validate,
+  type TypedPathTree,
   defineValidator,
 } from './signal.form';
 
@@ -49,37 +47,37 @@ function withForm<T>(fn: () => T): T {
   return TestBed.runInInjectionContext(fn);
 }
 
-//  function customValidator(path: SchemaPath<string>, options?: { message?: string }) {
-//   validate(path, ({ value }) =>
-//     value() === 'admin'
-//       ? { kind: 'customValidator', message: options?.message ?? 'Bu isim kullanılamaz' }
-//       : undefined,
-//   );
-// }
-
-// const customValidator = defineValidator(
-//   'customValidator',
-//   (value: string) => value !== 'admin' || 'Bu isim kullanılamaz',
-//   { message: 'Bu isim kullanılamaz' } // Varsayılan mesaj (isteğe bağlı)
-// );
-
 describe('signal-form sync validation', () => {
   it('exposes typed field errors via error bags', () => {
+    const initial: { name: string; email: string; consent: boolean } = {
+      name: '',
+      email: '',
+      consent: false,
+    };
+
+    // const customValidator = defineValidator(
+    //   'customValidator',
+    //   (value: string) => value !== 'admin' || 'Bu isim kullanılamaz',
+    //   { message: 'Bu isim kullanılamaz' } // Varsayılan mesaj (isteğe bağlı)
+    // );
+
     const form = withForm(() =>
-      createForm<{ name: string; email: string; consent: boolean }>(
-        { name: '', email: '', consent: false },
-        (path) => {
-          required(path.name);
-          minLength(path.name, 2);
-          required(path.email);
-          email(path.email);
-          requiredTrue(path.consent);
-          // customValidator(path.name);
-        },
-      ),
+      createForm(initial, (path) => [
+        required(path.name),
+        minLength(path.name, 2),
+        required(path.email),
+        email(path.email),
+        requiredTrue(path.consent),
+
+        // customValidator(path.name)
+      ])
     );
 
-    // form.name.errors.ö
+    // form.name.errors.required();
+    // form.name.errors.minLength();
+    // form.name.errors.email();
+    // form.name.errors.maxDate();
+    // let m = form.name.errors.customValidator()?.message;
 
     form.name().value.set('A');
     expect(fieldErrorBag(form.name())['required']).toBeUndefined();
@@ -99,15 +97,14 @@ describe('signal-form sync validation', () => {
   });
 
   it('supports matchField for password confirmation', () => {
+    const initial = { password: '', confirm: '' };
+
     const form = withForm(() =>
-      createForm<{ password: string; confirm: string }>(
-        { password: '', confirm: '' },
-        (path) => {
-          required(path.password);
-          required(path.confirm);
-          matchField(path.confirm, path.password, { message: 'The values do not match' });
-        },
-      ),
+      createForm(initial, (path) => [
+        required(path.password),
+        required(path.confirm),
+        matchField(path.confirm, path.password, { message: 'The values do not match' }),
+      ]),
     );
 
     form.password().value.set('123456');
@@ -122,17 +119,14 @@ describe('signal-form sync validation', () => {
   });
 
   it('supports matchFields as a form-level schema', () => {
-    const schema: FormSchema<{ password: string; confirm: string }> = (path) => {
-      required(path.password);
-      required(path.confirm);
-      matchFields<{ password: string; confirm: string }>('password', 'confirm', {
-        message: 'The values do not match',
-      })(path);
-    };
+    const initial = { password: '', confirm: '' };
+    const schema = (path: TypedPathTree<typeof initial>) => [
+      required(path.password),
+      required(path.confirm),
+      matchFields(path, 'password', 'confirm', { message: 'The values do not match' }),
+    ];
 
-    const form = withForm(() =>
-      createForm({ password: '', confirm: '' }, schema),
-    );
+    const form = withForm(() => createForm(initial, schema));
 
     form.password().value.set('123456');
     form.confirm().value.set('654321');
@@ -146,16 +140,15 @@ describe('signal-form sync validation', () => {
   });
 
   it('supports requiredWhen for conditional required', () => {
+    const initial = { hasCompany: false, companyName: '' };
+
     const form = withForm(() =>
-      createForm<{ hasCompany: boolean; companyName: string }>(
-        { hasCompany: false, companyName: '' },
-        (path) => {
-          requiredWhen(path.companyName, path.hasCompany, {
-            kind: 'companyRequired',
-            message: 'Company name is required',
-          });
-        },
-      ),
+      createForm(initial, (path) => [
+        requiredWhen(path.companyName, path.hasCompany, {
+          kind: 'companyRequired',
+          message: 'Company name is required',
+        }),
+      ]),
     );
 
     expect(errorBag(form.companyName().errors())['companyRequired']).toBeUndefined();
@@ -170,17 +163,12 @@ describe('signal-form sync validation', () => {
   });
 
   it('supports requiredWhenFields as a form-level schema', () => {
-    const schema: FormSchema<{ hasCompany: boolean; companyName: string }> = (path) => {
-      requiredWhenFields<{ hasCompany: boolean; companyName: string }>(
-        'hasCompany',
-        'companyName',
-        { message: 'Company name is required' },
-      )(path);
-    };
+    const initial = { hasCompany: false, companyName: '' };
+    const schema = (path: TypedPathTree<typeof initial>) => [
+      requiredWhenFields(path, 'hasCompany', 'companyName', { message: 'Company name is required' }),
+    ];
 
-    const form = withForm(() =>
-      createForm({ hasCompany: false, companyName: '' }, schema),
-    );
+    const form = withForm(() => createForm(initial, schema));
 
     expect(formErrorBag(form)['requiredWhen']).toBeUndefined();
 
@@ -196,9 +184,7 @@ describe('signal-form sync validation', () => {
 
 describe('signal-form value helpers', () => {
   it('supports patchValue', () => {
-    const form = withForm(() =>
-      createForm<{ first: string; last: string }>({ first: '', last: '' }),
-    );
+    const form = withForm(() => createForm({ first: '', last: '' }));
 
     patchValue(form, { first: 'Zeynep' });
 
@@ -209,15 +195,14 @@ describe('signal-form value helpers', () => {
 
   it('drops disabled branches from enabledValue', () => {
     const gate = signal(false);
+    const initial = { a: '', b: '' };
+
     const form = withForm(() =>
-      createForm<{ a: string; b: string }>(
-        { a: '', b: '' },
-        (path) => {
-          required(path.a);
-          required(path.b);
-          disableWhen(path.a, () => gate());
-        },
-      ),
+      createForm(initial, (path) => {
+        disableWhen(path.a, () => gate()); // void — blok gövdede kalır
+
+        return [required(path.a), required(path.b)];
+      }),
     );
 
     expect(form.a().disabled()).toBe(false);
@@ -231,15 +216,7 @@ describe('signal-form value helpers', () => {
 
   it('computes form status with disabled > pending > valid/invalid', () => {
     const disabled = signal(false);
-    const form = withForm(() =>
-      createForm<{ a: string }>(
-        { a: '' },
-        (path) => {
-          required(path.a);
-        },
-        { disabled },
-      ),
-    );
+    const form = withForm(() => createForm({ a: '' }, (path) => [required(path.a)], { disabled }));
 
     expect(formStatus(form)).toBe('invalid');
     expect(formStatusSignal(form)()).toBe('invalid');
@@ -255,9 +232,7 @@ describe('signal-form value helpers', () => {
 
 describe('signal-form dirty/touched helpers', () => {
   it('marks all fields touched via markAllTouched / touchAll', () => {
-    const form = withForm(() =>
-      createForm<{ a: string; b: string }>({ a: '', b: '' }),
-    );
+    const form = withForm(() => createForm({ a: '', b: '' }));
 
     expect(form().touched()).toBe(false);
     expect(form.a().touched()).toBe(false);
@@ -278,9 +253,7 @@ describe('signal-form dirty/touched helpers', () => {
   });
 
   it('marks dirty/pristine across fields', () => {
-    const form = withForm(() =>
-      createForm<{ a: string; b: string }>({ a: '', b: '' }),
-    );
+    const form = withForm(() => createForm({ a: '', b: '' }));
 
     form.a().controlValue.set('x');
     expect(form.a().dirty()).toBe(true);
@@ -297,9 +270,7 @@ describe('signal-form dirty/touched helpers', () => {
   });
 
   it('reset clears touched and dirty but keeps values', () => {
-    const form = withForm(() =>
-      createForm<{ a: string }>({ a: 'start' }, (path) => required(path.a)),
-    );
+    const form = withForm(() => createForm({ a: 'start' }, (path) => [required(path.a)]));
 
     form.a().controlValue.set('changed');
     markAllTouched(form);
@@ -317,10 +288,7 @@ describe('signal-form dirty/touched helpers', () => {
 describe('signal-form resetForm', () => {
   it('restores value to the createForm snapshot and clears dirty/touched', () => {
     const form = withForm(() =>
-      createForm<{ a: string; b: string }>(
-        { a: 'start', b: '' },
-        (path) => required(path.a),
-      ),
+      createForm({ a: 'start', b: '' }, (path) => [required(path.a)]),
     );
 
     form.a().controlValue.set('changed');
@@ -343,9 +311,10 @@ describe('signal-form resetForm', () => {
     const gate = disableControl(true);
 
     const form = withForm(() =>
-      createForm<{ a: string }>({ a: '' }, (path) => {
-        required(path.a);
-        disableWhen(path.a, gate);
+      createForm({ a: '' }, (path) => {
+        disableWhen(path.a, gate); // void — blok gövdede kalır
+
+        return [required(path.a)];
       }),
     );
 
@@ -363,7 +332,7 @@ describe('signal-form resetForm', () => {
   });
 
   it('supports an explicit value override', () => {
-    const form = withForm(() => createForm<{ a: string }>({ a: 'start' }));
+    const form = withForm(() => createForm({ a: 'start' }));
 
     form.a().controlValue.set('changed');
     resetForm(form, { value: { a: 'custom' } });
@@ -389,9 +358,7 @@ describe('signal-form disable helpers', () => {
   });
 
   it('createForm disabled option disables the whole form', () => {
-    const form = withForm(() =>
-      createForm<{ a: string }>({ a: '' }, undefined, { disabled: true }),
-    );
+    const form = withForm(() => createForm({ a: '' }, undefined, { disabled: true }));
 
     expect(form().disabled()).toBe(true);
     expect(formStatus(form)).toBe('disabled');
@@ -399,9 +366,7 @@ describe('signal-form disable helpers', () => {
 
   it('reactive disabled option follows the signal', () => {
     const off = signal(false);
-    const form = withForm(() =>
-      createForm<{ a: string }>({ a: '' }, undefined, { disabled: off }),
-    );
+    const form = withForm(() => createForm({ a: '' }, undefined, { disabled: off }));
 
     expect(form().disabled()).toBe(false);
     off.set(true);
@@ -418,7 +383,7 @@ describe('signal-form onChange', () => {
     const listener = vi.fn();
 
     const result = withForm(() => {
-      const form = createForm<{ a: string }>({ a: '' });
+      const form = createForm({ a: '' });
       const destroy = onChange(form, listener);
       return { form, destroy };
     });
@@ -440,7 +405,7 @@ describe('signal-form onChange', () => {
     const listener = vi.fn();
 
     const injector = withForm(() => TestBed.inject(Injector));
-    const form = withForm(() => createForm<{ a: string }>({ a: '' }));
+    const form = withForm(() => createForm({ a: '' }));
 
     const destroy = onChange(form, listener, { injector });
 
@@ -463,15 +428,15 @@ describe('signal-form async validation', () => {
     const calls: string[] = [];
 
     const form = withForm(() =>
-      createForm<{ username: string }>({ username: '' }, (path) => {
+      createForm({ username: '' }, (path) => [
         validateAsyncFn(path.username, async (value) => {
           calls.push(value);
           await tick(5);
           return value === 'taken'
             ? { kind: 'taken', message: 'already used' }
             : undefined;
-        }, { debounce: 10 });
-      }),
+        }, { debounce: 10 }),
+      ]),
     );
 
     form.username().value.set('taken');
@@ -491,12 +456,12 @@ describe('signal-form async validation', () => {
     const calls: string[] = [];
 
     const form = withForm(() =>
-      createForm<{ username: string }>({ username: '' }, (path) => {
+      createForm({ username: '' }, (path) => [
         validateAsyncFn(path.username, async (value) => {
           calls.push(value);
           return undefined;
-        }, { debounce: 20 });
-      }),
+        }, { debounce: 20 }),
+      ]),
     );
 
     form.username().value.set('a');
@@ -512,10 +477,10 @@ describe('signal-form async validation', () => {
     const spy = vi.fn(async () => undefined);
 
     const form = withForm(() =>
-      createForm<{ username: string }>({ username: '' }, (path) => {
-        minLength(path.username, 3);
-        validateAsyncFn(path.username, async () => spy(), { debounce: 0 });
-      }),
+      createForm({ username: '' }, (path) => [
+        minLength(path.username, 3),
+        validateAsyncFn(path.username, async () => spy(), { debounce: 0 }),
+      ]),
     );
 
     form.username().value.set('ab');
@@ -535,11 +500,11 @@ describe('signal-form async validation', () => {
     const spy = vi.fn(async () => undefined);
 
     const form = withForm(() =>
-      createForm<{ username: string }>({ username: 'x' }, (path) => {
+      createForm({ username: 'x' }, (path) => [
         validateAsyncFn(path.username, async () => spy(), {
           validateOnChange: false,
-        });
-      }),
+        }),
+      ]),
     );
 
     await tick(30);
@@ -554,13 +519,13 @@ describe('signal-form async validation', () => {
     const seen: unknown[] = [];
 
     const form = withForm(() =>
-      createForm<{ a: string; b: string }>({ a: '', b: '' }, (path) => {
-        required(path.a);
-        required(path.b);
+      createForm({ a: '', b: '' }, (path) => {
         validateFormAsync(path, async (values) => {
           seen.push(values);
           return { combo: 'already registered' };
-        }, { debounce: 5 });
+        }, { debounce: 5 }); // void — blok gövdede kalır
+
+        return [required(path.a), required(path.b)];
       }),
     );
 
@@ -576,15 +541,13 @@ describe('signal-form async validation', () => {
 
   it('validateForm resolves after pending settles', async () => {
     const form = withForm(() =>
-      createForm<{ username: string }>({ username: 'ali' }, (path) => {
+      createForm({ username: 'ali' }, (path) => [
         validateAsyncFn(path.username, async () => {
           await tick(20);
           return { kind: 'taken', message: 'used' };
-        }, { debounce: 5 });
-      }),
+        }, { debounce: 5 }),
+      ]),
     );
-
-    form.username().errors()
 
     const ok = await validateForm(form);
     expect(ok).toBe(false);
@@ -594,9 +557,9 @@ describe('signal-form async validation', () => {
 
   it('validateForm marks all fields touched when markAsTouched is set', async () => {
     const form = withForm(() =>
-      createForm<{ username: string }>({ username: '' }, (path) => {
-        validateAsyncFn(path.username, async () => undefined, { debounce: 0 });
-      }),
+      createForm({ username: '' }, (path) => [
+        validateAsyncFn(path.username, async () => undefined, { debounce: 0 }),
+      ]),
     );
 
     expect(form().touched()).toBe(false);
@@ -620,10 +583,7 @@ describe('signal-form error maps and error tree', () => {
 
   it('fieldErrors returns a reactive signal of the field error map', () => {
     const form = withForm(() =>
-      createForm<{ name: string }>({ name: '' }, (path) => {
-        required(path.name);
-        minLength(path.name, 2);
-      }),
+      createForm({ name: '' }, (path) => [required(path.name), minLength(path.name, 2)]),
     );
 
     const errors = fieldErrors(() => form.name());
@@ -636,9 +596,7 @@ describe('signal-form error maps and error tree', () => {
   });
 
   it('fieldErrors honours onlyTouched by hiding errors on untouched fields', () => {
-    const form = withForm(() =>
-      createForm<{ name: string }>({ name: '' }, (path) => required(path.name)),
-    );
+    const form = withForm(() => createForm({ name: '' }, (path) => [required(path.name)]));
 
     const errors = fieldErrors(() => form.name(), { onlyTouched: true });
 
@@ -649,15 +607,14 @@ describe('signal-form error maps and error tree', () => {
   });
 
   it('formErrors builds a model-shaped error tree with per-node errors', () => {
+    const initial = { givenName: '', address: { city: '', zip: '' } };
+
     const form = withForm(() =>
-      createForm<{ givenName: string; address: { city: string; zip: string } }>(
-        { givenName: '', address: { city: '', zip: '' } },
-        (path) => {
-          required(path.givenName);
-          required(path.address.city);
-          minLength(path.address.zip, 5);
-        },
-      ),
+      createForm(initial, (path) => [
+        required(path.givenName),
+        required(path.address.city),
+        minLength(path.address.zip, 5),
+      ]),
     );
 
     const errors = formErrors(form);
@@ -676,7 +633,7 @@ describe('signal-form error maps and error tree', () => {
 
   it('formErrors with onlyTouched hides errors on untouched subtrees', () => {
     const form = withForm(() =>
-      createForm<{ givenName: string }>({ givenName: '' }, (path) => required(path.givenName)),
+      createForm({ givenName: '' }, (path) => [required(path.givenName)]),
     );
 
     const errors = formErrors(form, { onlyTouched: true });
@@ -689,9 +646,7 @@ describe('signal-form error maps and error tree', () => {
 
   it('formErrors reflects the error message into the map', () => {
     const form = withForm(() =>
-      createForm<{ name: string }>({ name: '' }, (path) =>
-        required(path.name, { message: 'Name is required' }),
-      ),
+      createForm({ name: '' }, (path) => [required(path.name, { message: 'Name is required' })]),
     );
 
     const errors = formErrors(form);
@@ -702,10 +657,7 @@ describe('signal-form error maps and error tree', () => {
 describe('signal-form field error signals', () => {
   it('exposes per-kind error signals via the errors accessor', () => {
     const form = withForm(() =>
-      createForm<{ name: string }>({ name: '' }, (path) => {
-        required(path.name);
-        minLength(path.name, 2);
-      }),
+      createForm({ name: '' }, (path) => [required(path.name), minLength(path.name, 2)]),
     );
 
     const errors = fieldErrorSignals(() => form.name());
@@ -720,9 +672,7 @@ describe('signal-form field error signals', () => {
 
   it('fieldErrorSignals reports the custom message on the error signal', () => {
     const form = withForm(() =>
-      createForm<{ name: string }>({ name: '' }, (path) =>
-        required(path.name, { message: 'Name is required' }),
-      ),
+      createForm({ name: '' }, (path) => [required(path.name, { message: 'Name is required' })]),
     );
 
     const errors = fieldErrorSignals(() => form.name());
@@ -745,7 +695,7 @@ describe('signal-form createForm inputs', () => {
   });
 
   it('can be created without a schema', () => {
-    const form = withForm(() => createForm<{ a: string }>({ a: 'x' }));
+    const form = withForm(() => createForm({ a: 'x' }));
 
     expect(form().value()).toEqual({ a: 'x' });
     expect(form().valid()).toBe(true);
@@ -758,9 +708,9 @@ describe('signal-form createForm inputs', () => {
 describe('signal-form matchField and enabledValue extras', () => {
   it('matchField supports a custom equals for Date values', () => {
     const form = withForm(() =>
-      createForm<{ from: Date; to: Date }>(
+      createForm(
         { from: new Date(2020, 0, 1), to: new Date(2020, 0, 1) },
-        (path) => matchField(path.to, path.from),
+        (path) => [matchField(path.to, path.from)],
       ),
     );
 
@@ -773,10 +723,9 @@ describe('signal-form matchField and enabledValue extras', () => {
 
   it('matchField ignores empty values ', () => {
     const form = withForm(() =>
-      createForm<{ password: string; confirm: string }>(
-        { password: '', confirm: '' },
-        (path) => matchField(path.confirm, path.password),
-      ),
+      createForm({ password: '', confirm: '' }, (path) => [
+        matchField(path.confirm, path.password),
+      ]),
     );
 
     form.confirm().value.set('');
@@ -789,15 +738,14 @@ describe('signal-form matchField and enabledValue extras', () => {
 
   it('enabledValue preserves nested enabled branches and drops disabled leaves', () => {
     const gate = signal(false);
+    const initial = { account: { name: '', ssn: '' } };
+
     const form = withForm(() =>
-      createForm<{ account: { name: string; ssn: string } }>(
-        { account: { name: '', ssn: '' } },
-        (path) => {
-          required(path.account.name);
-          required(path.account.ssn);
-          disableWhen(path.account.ssn, () => gate());
-        },
-      ),
+      createForm(initial, (path) => {
+        disableWhen(path.account.ssn, () => gate()); // void — blok gövdede kalır
+
+        return [required(path.account.name), required(path.account.ssn)];
+      }),
     );
 
     expect(enabledValue(form)).toEqual({ account: { name: '', ssn: '' } });
@@ -809,8 +757,9 @@ describe('signal-form matchField and enabledValue extras', () => {
 
   it('enabledValue drops disabled array items and shifts indices', () => {
     const gate = signal(false);
+    // Yalnızca void kurallar: diziye girecek tipli kural yok, blok gövde kalır
     const form = withForm(() =>
-      createForm<{ tags: string[] }>({ tags: ['a', 'b'] }, (path) => {
+      createForm({ tags: ['a', 'b'] }, (path) => {
         required(path.tags);
         applyEach(path.tags, (item) => {
           disabled(item, {
@@ -825,5 +774,79 @@ describe('signal-form matchField and enabledValue extras', () => {
     gate.set(true);
     expect(enabledValue(form)).toEqual({ tags: [] });
     expect(form().value()).toEqual({ tags: ['a', 'b'] });
+  });
+});
+
+describe('signal-form typed error kinds (rule list schema)', () => {
+  it('exposes custom validator kinds on the field errors accessor', () => {
+    const usernameFree = defineValidator('usernameFree', (value: string) =>
+      value !== 'admin' || 'Bu kullanıcı adı kullanılamaz',
+    );
+
+    const form = withForm(() => createForm({ email: '' }, (path) => [usernameFree(path.email)]));
+
+    expect(form.email.errors.usernameFree()).toBeUndefined();
+
+    form.email().value.set('admin');
+
+    expect(form.email.errors.usernameFree()?.message).toBe('Bu kullanıcı adı kullanılamaz');
+    expect(form.email.errors.usernameFree()?.kind).toBe('usernameFree');
+    expect(fieldErrorSignals(form.email).usernameFree()?.kind).toBe('usernameFree');
+    expect(fieldErrors(form.email)().usernameFree).toBe('Bu kullanıcı adı kullanılamaz');
+    expect(formErrors(form)().email.errors.usernameFree).toBe('Bu kullanıcı adı kullanılamaz');
+
+    form.email().value.set('other');
+    expect(form.email.errors.usernameFree()).toBeUndefined();
+  });
+
+  it('exposes matchField kinds on the field and matchFields kinds on the root', () => {
+    const initial = { password: '', confirm: '', hasCompany: false, companyName: '' };
+
+    const form = withForm(() =>
+      createForm(initial, (path) => [
+        required(path.password),
+        required(path.confirm),
+        matchField(path.confirm, path.password, { message: 'The values do not match' }),
+        matchFields(path, 'password', 'confirm', { message: 'Root mismatch' }),
+        requiredWhenFields(path, 'hasCompany', 'companyName', {
+          message: 'Company name is required',
+        }),
+      ]),
+    );
+
+    expect(form.errors.match()).toBeUndefined();
+    expect(form.errors.requiredWhen()).toBeUndefined();
+
+    form.password().value.set('123456');
+    form.confirm().value.set('654321');
+    form.hasCompany().value.set(true);
+
+    expect(form.confirm.errors.match()?.message).toBe('The values do not match');
+    expect(form.errors.match()?.message).toBe('Root mismatch');
+    expect(form.errors.requiredWhen()?.message).toBe('Company name is required');
+    expect(formErrorBag(form)['match']).toBe('Root mismatch');
+    expect(formErrors(form)().errors.match).toBe('Root mismatch');
+
+    form.confirm().value.set('123456');
+    expect(form.confirm.errors.match()).toBeUndefined();
+    expect(form.errors.match()).toBeUndefined();
+  });
+
+  it('supports a custom kind on matchFields and requiredWhenFields', () => {
+    const initial = { password: '', confirm: '', hasCompany: false, companyName: '' };
+
+    const form = withForm(() =>
+      createForm(initial, (path) => [
+        matchFields(path, 'password', 'confirm', { kind: 'credentialsMatch' }),
+        requiredWhenFields(path, 'hasCompany', 'companyName', { kind: 'companyRequired' }),
+      ]),
+    );
+
+    form.password().value.set('a');
+    form.confirm().value.set('b');
+    form.hasCompany().value.set(true);
+
+    expect(form.errors.credentialsMatch()).toEqual(expect.objectContaining({ kind: 'credentialsMatch' }));
+    expect(form.errors.companyRequired()).toEqual(expect.objectContaining({ kind: 'companyRequired' }));
   });
 });
